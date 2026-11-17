@@ -1,0 +1,101 @@
+# Pixbot 工作空间根清单：统一版本、依赖、lint 与发布构建参数。
+
+[workspace]
+# 依赖解析器 v2：按目标平台/构建类型分别解析 features，
+# 避免 dev/build 依赖的 features 污染正常依赖；Rust 2021+ 默认行为。
+resolver = "2"
+# 成员用单层 glob 收纳 crates/ 下所有直接子目录；新增 crate 无需改此文件，
+# 但不支持嵌套层级，且必须位于 crates/ 一级目录内才会被编译。
+members = ["crates/*"]
+
+[workspace.package]
+# 子 crate 用 { workspace = true } 继承下列字段，避免版本漂移。
+# 语义化版本 MAJOR.MINOR.PATCH，发布时统一 bump（如 0.1.0-rc.1）。
+version = "0.1.0"
+# 语言 edition（语法/lint 默认值层面），与编译器版本无关；
+# 取 2015/2018/2021/2024，本项目使用 2024。
+edition = "2024"
+# MSRV：最低编译器版本，低于此版本的 cargo 构建会直接报错提示。
+rust-version = "1.93"
+# SPDX 许可证标识，需与仓库 LICENSE 文件一致；双许可写作 "MIT OR Apache-2.0"。
+license = "MIT"
+
+# 统一依赖版本：各 crate 通过 { workspace = true } 引用，禁止私自锁版本
+# 版本号语义为 ^x.y.z（如 "4" 等价 ">=4.0.0,<5.0.0"）；
+# 新增依赖须先更新 docs/architecture.md 的外部依赖清单。
+[workspace.dependencies]
+
+# -- 内部 crate --
+# 同工作空间内的本地 path 依赖：只写 path，不写 version（path 依赖不可发布），
+# 路径区分大小写，Linux 上大小写不匹配会直接构建失败。
+contracts = { path = "crates/contracts" }
+agent = { path = "crates/agent" }
+context = { path = "crates/context" }
+providers = { path = "crates/providers" }
+tools = { path = "crates/tools" }
+session = { path = "crates/session" }
+config = { path = "crates/config" }
+bootstrap = { path = "crates/bootstrap" }
+headless = { path = "crates/headless" }
+
+# -- CLI --
+# clap 4：derive 特性启用 #[derive(Parser)] 宏式解析；
+# 未开 derive 时该宏不可用，是常见编译报错来源。
+clap = { version = "4", features = ["derive"] }
+# rustyline 15：交互式行编辑（历史、补全、多行）；无 features/path 时可用字符串简写。
+rustyline = "15"
+
+# -- 异步与并发 --
+# tokio 1：features 按需开启，多开会增加编译时间与体积；
+# macros=#[tokio::main]/#[tokio::test]；rt-multi-thread=多线程运行时（仅 rt 为单线程）；
+# sync=Mutex/RwLock/mpsc；process=异步子进程；fs=异步文件；io-std=异步标准流；
+# io-util=AsyncRead/WriteExt；time=sleep/timeout/interval。缺失对应 feature 会在运行期 panic。
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "process", "fs", "io-std", "io-util", "time"] }
+# tokio-util 0.7：Framed/Codec/Either 等流式编解码与组合工具。
+tokio-util = "0.7"
+# futures 0.3：通用 Future/Stream/Sink 组合子（join!/select! 等）。
+futures = "0.3"
+# async-trait 0.1：trait 中声明 async fn；动态分发（dyn）场景仍需它把返回值装箱。
+async-trait = "0.1"
+
+# -- 序列化 --
+# serde 1：必须开 derive 才能用 #[derive(Serialize, Deserialize)]；
+# 持久化模型新增字段需加 #[serde(default)] 以兼容旧 JSONL。
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# serde_yaml 0.3：YAML 配置解析，API 与 1.x 系列不兼容，升级需改代码。
+serde_yaml = "0.3"
+
+# -- 错误处理 --
+# anyhow 1：应用边界（cli/bootstrap）的通用错误传播；
+# thiserror 2：lib 内部结构化错误枚举，每 crate 一个 #[derive(Error)]。
+anyhow = "1"
+thiserror = "2"
+
+# lint 级别取值：allow/deny/forbid 关闭/报错/不可覆盖，warn 仅告警；
+# 本表需各 crate 显式 opt-in（Cargo 不会自动继承 workspace lints）。
+[workspace.lints.rust]
+# 交付物三道闸之一：clippy -D warnings 必须长期保持全绿，
+# 故在建仓首日即把这些 lint 提升为 deny，避免日后批量返工。
+unused_imports = "deny"     # 残留 import 直接失败；re-export 用 pub use，确需保留加 #[allow]
+unused_variables = "deny"   # 有意保留的变量用下划线前缀 _name 豁免
+dead_code = "warn"          # 仅告警，避免阻碍迭代；CI 由 clippy -D warnings 提升为错误
+
+# 仅在 cargo clippy 下生效，cargo build 不检查。
+[workspace.lints.clippy]
+unwrap_used = "deny"        # 禁止 unwrap()；锁中毒用 unwrap_or_else(|e| e.into_inner()) 恢复
+expect_used = "deny"        # 禁止 expect()，错误须显式处理
+panic = "deny"              # 禁止 panic!，库代码不得主动崩溃
+unreachable = "deny"        # 禁止 unreachable!()，用穷尽 match 表达不可能分支
+dbg_macro = "deny"          # 禁止 dbg!()，防止调试输出残留
+todo = "deny"               # 禁止 todo!()，防止未完成代码混入主干
+unimplemented = "deny"      # 禁止 unimplemented!()；临时占位须 #[allow] 显式豁免并登记 TODO
+
+# 仅对 cargo build --release 生效；dev 构建保持默认以加快迭代。
+[profile.release]
+opt-level = 3            # 最高运行时优化；体积优先可改 "s"，极致体积 "z"，需实测取舍
+strip = true             # 剥离符号表，显著减小二进制；代价是失去符号化回溯
+debug = false            # 不生成DWARF调试信息，去掉源码行号、路径
+panic = "abort"          # 发生panic直接终止程序，移除panic回溯相关代码，减小bin；与 catch_unwind 容错互斥
+lto = "thin"             # 链接时全局优化，进一步删减死代码，缩小体积+提速；"fat" 更彻底但更慢
+codegen-units = 1        # 减少并行编译单元，提升LTO优化效果（编译变慢）

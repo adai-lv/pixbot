@@ -1,0 +1,20 @@
+[package]
+name = "cli"
+description = "Pixbot is a agent that can help you with your daily tasks."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pixbot"
+path = "src/main.rs"
+
+[dependencies]
+headless.workspace = true
+clap.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+
+[lints]
+workspace = true
